@@ -4,808 +4,891 @@ import Vehicle from "../models/Vehicle.js";
 import Booking from "../models/BookingPayment.js";
 import multer from 'multer';
 import { authMiddleware } from "../middleware/auth.js";
+import mongoose from "mongoose";
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 
 const router = express.Router();
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /* =========================================================
-   SIMPLE DATABASE STORAGE CONFIGURATION
+   CONSTANTS & CONFIGURATION
 ========================================================= */
 
-// Memory storage for processing images
-const memoryStorage = multer.memoryStorage();
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_FILES = 5;
+const LICENSE_PLATE_REGEX = /^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{1,4}$/;
+const MIN_YEAR = 1980;
 
-// File filter for images only
+const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, '../uploads/vehicles');
+
+// Ensure upload directory exists
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+}
+
+/* =========================================================
+   MULTER CONFIGURATION
+========================================================= */
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, UPLOAD_DIR);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1E9)}`;
+    const ext = path.extname(file.originalname);
+    cb(null, `vehicle-${uniqueSuffix}${ext}`);
+  }
+});
+
 const fileFilter = (req, file, cb) => {
-  const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
-
-  if (allowedMimes.includes(file.mimetype)) {
+  if (ALLOWED_IMAGE_TYPES.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error(`Invalid file type. Allowed types: ${allowedMimes.join(', ')}`), false);
+    cb(new Error(`Invalid file type. Allowed: ${ALLOWED_IMAGE_TYPES.join(', ')}`), false);
   }
 };
 
-// Configure multer with memory storage
 const upload = multer({
-  storage: memoryStorage,
+  storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit per file
-    files: 5, // Maximum 5 images per vehicle
+    fileSize: MAX_FILE_SIZE,
+    files: MAX_FILES,
   },
 });
 
 /* =========================================================
-   IMAGE PROCESSING FUNCTIONS - SIMPLIFIED
+   UTILITY FUNCTIONS
 ========================================================= */
 
-// Helper function to process uploaded images - store as base64 in database
-const processUploadedImages = async (files) => {
-  if (!files || files.length === 0) {
-    return [];
-  }
-
-  console.log(`Processing ${files.length} uploaded images for database storage...`);
-
-  // Convert files to base64 for database storage
-  return files.map(file => ({
-    data: file.buffer.toString('base64'),
-    contentType: file.mimetype,
-    originalName: file.originalname,
-    size: file.size,
-    filename: `vehicle-${Date.now()}-${Math.round(Math.random() * 1E9)}.${file.originalname.split('.').pop()}`,
-    uploadedAt: new Date()
-  }));
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
 };
 
-// Helper function to get image URL for frontend
-const getImageUrl = (image, req) => {
-  if (!image) return null;
-
-  // For GridFS stored as string
-  if (typeof image === 'string' && mongoose.Types.ObjectId.isValid(image)) {
-    return `${req.protocol}://${req.get('host')}/api/images/${image}`;
+const validateObjectId = (id) => {
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    throw new Error('Invalid ID format');
   }
-
-  // Cloudinary or other legacy logic
-  if (image.url) return image.url;
-  return null;
 };
 
+const sanitizeString = (str) => {
+  return str ? str.trim() : '';
+};
 
-/* =========================================================
-   USER MANAGEMENT
-========================================================= */
-
-// Get all users (including _id and excluding password)
-router.get("/users", authMiddleware, async (req, res) => {
+const deleteFile = (filePath) => {
   try {
-    const users = await User.find({}).select("-password");
-
-    const usersWithBookingCount = await Promise.all(
-      users.map(async (user) => {
-        const bookingCount = await Booking.countDocuments({ user: user._id });
-        return {
-          _id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          role: user.role,
-          isActive: user.isActive,
-          lastLoginAt: user.lastLoginAt,
-          createdAt: user.createdAt,
-          updatedAt: user.updatedAt,
-          bookingsCount: bookingCount,
-          avatar: user.avatar || user.profilePicture || null
-        };
-      })
-    );
-
-    res.json({ success: true, users: usersWithBookingCount });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch users",
-      details: err.message,
-    });
-  }
-});
-
-// Get single user
-router.get("/users/:id", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id).select("-password");
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const bookingCount = await Booking.countDocuments({ user: user._id });
-
-    const userWithBookingCount = {
-      ...user.toObject(),
-      bookingsCount: bookingCount
-    };
-
-    res.json(userWithBookingCount);
-  } catch (err) {
-    res.status(500).json({
-      error: "Failed to fetch user",
-      details: err.message,
-    });
-  }
-});
-
-// Block User
-router.patch("/users/:id/block", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    user.isActive = false;
-    await user.save();
-
-    res.json({
-      success: true,
-      message: "User blocked successfully",
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        isActive: user.isActive
-      }
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to block user",
-      details: err.message,
-    });
-  }
-});
-
-// Unblock User
-router.patch("/users/:id/unblock", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    user.isActive = true;
-    await user.save();
-
-    res.json({
-      success: true,
-      message: "User unblocked successfully",
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        isActive: user.isActive
-      }
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to unblock user",
-      details: err.message,
-    });
-  }
-});
-
-// Delete User
-router.delete("/users/:id", authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.params.id);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const activeBookings = await Booking.countDocuments({
-      user: req.params.id,
-      status: { $in: ['Pending', 'Confirmed'] }
-    });
-
-    if (activeBookings > 0) {
-      return res.status(400).json({
-        error: "Cannot delete user with active bookings",
-        details: `User has ${activeBookings} active booking(s)`
-      });
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
     }
-
-    await User.findByIdAndDelete(req.params.id);
-
-    res.json({
-      success: true,
-      message: "User deleted successfully"
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to delete user",
-      details: err.message,
-    });
+  } catch (error) {
+    console.error('Error deleting file:', error);
   }
-});
-
-// Update User
-router.put("/users/:id", authMiddleware, async (req, res) => {
-  try {
-    const { name, email, phone, role } = req.body;
-
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { name, email, phone, role, updatedAt: new Date() },
-      { new: true }
-    ).select("-password");
-
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    res.json({
-      success: true,
-      message: "User updated successfully",
-      user
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to update user",
-      details: err.message,
-    });
-  }
-});
+};
 
 /* =========================================================
-   VEHICLE MANAGEMENT - SIMPLIFIED DATABASE STORAGE
+   IMAGE PROCESSING
 ========================================================= */
 
-// Get all vehicles with booking counts
-router.get("/vehicles", async (req, res) => {
-  try {
-    const vehicles = await Vehicle.find();
-
-    const vehiclesWithBookingData = await Promise.all(
-      vehicles.map(async (vehicle) => {
-        // Count total bookings for this vehicle
-        const bookingCount = await Booking.countDocuments({ vehicle: vehicle._id });
-
-        // Count only active bookings
-        const activeBookings = await Booking.countDocuments({
-          vehicle: vehicle._id,
-          status: { $in: ["Pending", "Confirmed", "Completed"] },
-        });
-
-        // Get the latest booking for payment status
-        const latestBooking = await Booking.findOne({ vehicle: vehicle._id })
-          .sort({ createdAt: -1 }) // latest booking
-          .select("paymentStatus status payment.provider payment.amount payment.currency");
-
-        // Process images for frontend consumption
-        const processedImages = vehicle.images
-          ? vehicle.images.map((image) => getImageUrl(image)).filter((url) => url)
-          : [];
-
+const processUploadedImages = async (files) => {
+  if (!files || files.length === 0) return [];
+  
+  const processedImages = await Promise.all(
+    files.map(async (file) => {
+      try {
+        if (process.env.ENABLE_IMAGE_OPTIMIZATION === 'true') {
+          const optimizedPath = file.path.replace(/\.(jpg|jpeg|png)$/i, '-optimized.webp');
+          
+          await sharp(file.path)
+            .resize(1200, 800, { fit: 'inside', withoutEnlargement: true })
+            .webp({ quality: 85 })
+            .toFile(optimizedPath);
+          
+          deleteFile(file.path);
+          file.path = optimizedPath;
+          file.filename = path.basename(optimizedPath);
+        }
+        
         return {
-          _id: vehicle._id,
-          name: vehicle.name,
-          brand: vehicle.brand,
-          type: vehicle.type,
-          licensePlate: vehicle.licensePlate,
-          capacity: vehicle.capacity,
-          pricePerHour: vehicle.pricePerHour,
-          pricePerKM: vehicle.pricePerKM,
-          isAvailable: vehicle.isAvailable,
-          location: vehicle.location,
-          images: processedImages,
-          features: vehicle.features,
-          fuelType: vehicle.fuelType,
-          transmission: vehicle.transmission,
-          year: vehicle.year,
-          color: vehicle.color,
-          createdAt: vehicle.createdAt,
-          updatedAt: vehicle.updatedAt,
-
-          // Booking stats
-          bookingsCount: bookingCount,
-          activeBookings,
-
-          // Latest payment + booking info
-          lastPaymentStatus: latestBooking ? latestBooking.paymentStatus : "No Bookings",
-          lastBookingStatus: latestBooking ? latestBooking.status : "No Bookings",
-          lastPaymentInfo: latestBooking
-            ? {
-                provider: latestBooking.payment?.provider || null,
-                amount: latestBooking.payment?.amount || null,
-                currency: latestBooking.payment?.currency || null,
-              }
-            : null,
+          filename: file.filename,
+          originalName: file.originalname,
+          path: file.path,
+          size: file.size,
+          mimetype: file.mimetype,
+          url: `/uploads/vehicles/${file.filename}`,
+          uploadedAt: new Date()
         };
-      })
-    );
+      } catch (error) {
+        console.error('Error processing image:', error);
+        deleteFile(file.path);
+        throw error;
+      }
+    })
+  );
+  
+  return processedImages;
+};
 
-    res.json({
-      success: true,
-      vehicles: vehiclesWithBookingData,
-      storageType: "database",
-    });
-  } catch (err) {
-    res.status(500).json({
+const deleteVehicleImages = (images) => {
+  if (!images || images.length === 0) return;
+  
+  images.forEach(image => {
+    if (image.path) {
+      deleteFile(image.path);
+    } else if (image.filename) {
+      deleteFile(path.join(UPLOAD_DIR, image.filename));
+    }
+  });
+};
+
+/* =========================================================
+   VALIDATION FUNCTIONS
+========================================================= */
+
+const validateVehicleData = (data) => {
+  const errors = [];
+  
+  if (!sanitizeString(data.name)) errors.push("Vehicle name is required");
+  if (!sanitizeString(data.brand)) errors.push("Brand is required");
+  if (!sanitizeString(data.type)) errors.push("Type is required");
+  if (!sanitizeString(data.licensePlate)) errors.push("License plate is required");
+  
+  if (!data.pricePerHour || parseFloat(data.pricePerHour) <= 0) {
+    errors.push("Price per Hour must be greater than 0");
+  }
+  
+  const licensePlate = sanitizeString(data.licensePlate).toUpperCase();
+  if (licensePlate && !LICENSE_PLATE_REGEX.test(licensePlate)) {
+    errors.push("Invalid license plate format (expected: KA01AB1234)");
+  }
+  
+  const year = parseInt(data.year);
+  const currentYear = new Date().getFullYear();
+  if (year && (year < MIN_YEAR || year > currentYear + 1)) {
+    errors.push(`Year must be between ${MIN_YEAR} and ${currentYear + 1}`);
+  }
+  
+  return errors;
+};
+
+const parseFeatures = (features) => {
+  if (!features) return [];
+  
+  if (typeof features === 'string') {
+    return features.split(',').map(f => f.trim()).filter(f => f);
+  }
+  
+  return Array.isArray(features) ? features : [];
+};
+
+/* =========================================================
+   USER MANAGEMENT ROUTES
+========================================================= */
+
+router.get("/users", authMiddleware, asyncHandler(async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 50;
+  const skip = (page - 1) * limit;
+  const search = req.query.search || '';
+  
+  const query = search 
+    ? {
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { email: { $regex: search, $options: 'i' } }
+        ]
+      }
+    : {};
+  
+  const [users, totalUsers] = await Promise.all([
+    User.find(query).select("-password").skip(skip).limit(limit).lean(),
+    User.countDocuments(query)
+  ]);
+  
+  const usersWithBookingCount = await Promise.all(
+    users.map(async (user) => {
+      const [bookingCount, activeBookings] = await Promise.all([
+        Booking.countDocuments({ user: user._id }),
+        Booking.countDocuments({ 
+          user: user._id, 
+          status: { $in: ['Pending', 'Confirmed'] } 
+        })
+      ]);
+      
+      return {
+        ...user,
+        bookingsCount: bookingCount,
+        activeBookings: activeBookings,
+        avatar: user.avatar || user.profilePicture || null
+      };
+    })
+  );
+  
+  res.json({ 
+    success: true, 
+    users: usersWithBookingCount,
+    pagination: {
+      page,
+      limit,
+      totalPages: Math.ceil(totalUsers / limit),
+      totalUsers
+    }
+  });
+}));
+
+router.get("/users/:id", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const user = await User.findById(req.params.id).select("-password").lean();
+  if (!user) {
+    return res.status(404).json({ success: false, error: "User not found" });
+  }
+  
+  const [bookingCount, activeBookings, bookings] = await Promise.all([
+    Booking.countDocuments({ user: user._id }),
+    Booking.countDocuments({ 
+      user: user._id, 
+      status: { $in: ['Pending', 'Confirmed'] } 
+    }),
+    Booking.find({ user: user._id })
+      .populate('vehicle', 'name brand type')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean()
+  ]);
+  
+  res.json({
+    success: true,
+    user: {
+      ...user,
+      bookingsCount: bookingCount,
+      activeBookings: activeBookings,
+      recentBookings: bookings
+    }
+  });
+}));
+
+router.patch("/users/:id/block", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    { isActive: false, updatedAt: new Date() },
+    { new: true }
+  ).select("_id name email isActive");
+  
+  if (!user) {
+    return res.status(404).json({ success: false, error: "User not found" });
+  }
+  
+  res.json({
+    success: true,
+    message: "User blocked successfully",
+    user
+  });
+}));
+
+router.patch("/users/:id/unblock", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    { isActive: true, updatedAt: new Date() },
+    { new: true }
+  ).select("_id name email isActive");
+  
+  if (!user) {
+    return res.status(404).json({ success: false, error: "User not found" });
+  }
+  
+  res.json({
+    success: true,
+    message: "User unblocked successfully",
+    user
+  });
+}));
+
+router.delete("/users/:id", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const activeBookings = await Booking.countDocuments({
+    user: req.params.id,
+    status: { $in: ['Pending', 'Confirmed'] }
+  });
+  
+  if (activeBookings > 0) {
+    return res.status(400).json({
       success: false,
-      error: "Failed to fetch vehicles",
-      details: err.message,
+      error: "Cannot delete user with active bookings",
+      details: `User has ${activeBookings} active booking(s)`
     });
   }
-});
+  
+  const user = await User.findByIdAndDelete(req.params.id);
+  if (!user) {
+    return res.status(404).json({ success: false, error: "User not found" });
+  }
+  
+  res.json({
+    success: true,
+    message: "User deleted successfully"
+  });
+}));
 
-// Get single vehicle
-router.get("/vehicles/:id", authMiddleware, async (req, res) => {
-  try {
-    const vehicle = await Vehicle.findById(req.params.id);
-    if (!vehicle) return res.status(404).json({ error: "Vehicle not found" });
+router.put("/users/:id", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const { name, email, phone, mobile, role } = req.body;
+  
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    { 
+      name: sanitizeString(name), 
+      email: sanitizeString(email), 
+      phone: sanitizeString(phone), 
+      mobile: sanitizeString(mobile), 
+      role, 
+      updatedAt: new Date() 
+    },
+    { new: true, runValidators: true }
+  ).select("-password");
+  
+  if (!user) {
+    return res.status(404).json({ success: false, error: "User not found" });
+  }
+  
+  res.json({
+    success: true,
+    message: "User updated successfully",
+    user
+  });
+}));
 
-    const bookingCount = await Booking.countDocuments({ vehicle: vehicle._id });
-    const activeBookings = await Booking.countDocuments({
+/* =========================================================
+   VEHICLE MANAGEMENT ROUTES
+========================================================= */
+
+router.get("/vehicles", authMiddleware, asyncHandler(async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 50;
+  const skip = (page - 1) * limit;
+  const search = req.query.search || '';
+  const type = req.query.type;
+  const availability = req.query.availability;
+  
+  const query = {};
+  
+  if (search) {
+    query.$or = [
+      { name: { $regex: search, $options: 'i' } },
+      { brand: { $regex: search, $options: 'i' } },
+      { licensePlate: { $regex: search, $options: 'i' } }
+    ];
+  }
+  
+  if (type) query.type = type;
+  if (availability !== undefined) query.isAvailable = availability === 'true';
+  
+  const [vehicles, totalVehicles] = await Promise.all([
+    Vehicle.find(query).skip(skip).limit(limit).lean(),
+    Vehicle.countDocuments(query)
+  ]);
+  
+  const vehiclesWithBookingData = await Promise.all(
+    vehicles.map(async (vehicle) => {
+      const [bookingCount, activeBookings, completedBookings, revenue] = await Promise.all([
+        Booking.countDocuments({ vehicle: vehicle._id }),
+        Booking.countDocuments({
+          vehicle: vehicle._id,
+          status: { $in: ["Pending", "Confirmed"] },
+        }),
+        Booking.countDocuments({
+          vehicle: vehicle._id,
+          status: "Completed"
+        }),
+        Booking.aggregate([
+          { 
+            $match: { 
+              vehicle: vehicle._id,
+              status: "Completed",
+              "payment.status": "Success"
+            }
+          },
+          {
+            $group: {
+              _id: null,
+              total: { $sum: "$payment.amount" }
+            }
+          }
+        ])
+      ]);
+      
+      const processedImages = vehicle.images
+        ? vehicle.images.map(img => img.url).filter(Boolean)
+        : [];
+
+      return {
+        ...vehicle,
+        images: processedImages,
+        bookingsCount: bookingCount,
+        activeBookings,
+        completedBookings,
+        totalRevenue: revenue.length > 0 ? revenue[0].total : 0
+      };
+    })
+  );
+  
+  res.json({
+    success: true,
+    vehicles: vehiclesWithBookingData,
+    pagination: {
+      page,
+      limit,
+      totalPages: Math.ceil(totalVehicles / limit),
+      totalVehicles
+    }
+  });
+}));
+
+router.get("/vehicles/:id", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const vehicle = await Vehicle.findById(req.params.id).lean();
+  if (!vehicle) {
+    return res.status(404).json({ success: false, error: "Vehicle not found" });
+  }
+  
+  const [bookingCount, activeBookings, bookings] = await Promise.all([
+    Booking.countDocuments({ vehicle: vehicle._id }),
+    Booking.countDocuments({
       vehicle: vehicle._id,
       status: { $in: ['Pending', 'Confirmed'] }
-    });
-
-    // Process images for frontend consumption
-    const processedImages = vehicle.images ?
-      vehicle.images.map(image => getImageUrl(image)).filter(url => url) : [];
-
-    const vehicleWithBookingCount = {
-      ...vehicle.toObject(),
+    }),
+    Booking.find({ vehicle: vehicle._id })
+      .populate('user', 'name email')
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean()
+  ]);
+  
+  const processedImages = vehicle.images
+    ? vehicle.images.map(img => img.url).filter(Boolean)
+    : [];
+  
+  res.json({
+    success: true,
+    vehicle: {
+      ...vehicle,
       images: processedImages,
       bookingsCount: bookingCount,
-      activeBookings: activeBookings
-    };
+      activeBookings: activeBookings,
+      recentBookings: bookings
+    }
+  });
+}));
 
-    res.json(vehicleWithBookingCount);
-  } catch (err) {
-    res.status(500).json({
-      error: "Failed to fetch vehicle",
-      details: err.message,
+router.post("/vehicles", authMiddleware, upload.array('images', MAX_FILES), asyncHandler(async (req, res) => {
+  const validationErrors = validateVehicleData(req.body);
+  if (validationErrors.length > 0) {
+    if (req.files) {
+      req.files.forEach(file => deleteFile(file.path));
+    }
+    return res.status(400).json({
+      success: false,
+      error: "Validation failed",
+      details: validationErrors
     });
   }
-});
-
-// Create Vehicle with Database Storage
-router.post("/vehicles", upload.array('images', 5), async (req, res) => {
+  
+  const licensePlate = sanitizeString(req.body.licensePlate).toUpperCase();
+  const existingVehicle = await Vehicle.findOne({ licensePlate });
+  if (existingVehicle) {
+    if (req.files) {
+      req.files.forEach(file => deleteFile(file.path));
+    }
+    return res.status(400).json({
+      success: false,
+      error: "Duplicate license plate",
+      details: "This license plate is already registered."
+    });
+  }
+  
+  let uploadedImages = [];
   try {
-    console.log(`Creating vehicle with ${req.files?.length || 0} images`);
-    console.log('Vehicle data:', req.body);
-
-    // Process uploaded images
-    const processedImages = await processUploadedImages(req.files);
-    console.log(`Processed ${processedImages.length} images for database storage`);
-
-    // Parse features
-    let features = [];
-    if (req.body.features) {
-      features = typeof req.body.features === 'string'
-        ? req.body.features.split(',').map(f => f.trim()).filter(f => f)
-        : req.body.features;
-    }
-
-    // Create vehicle data object
-    const vehicleData = {
-      name: req.body.name?.trim(),
-      brand: req.body.brand?.trim(),
-      type: req.body.type?.trim(),
-      licensePlate: req.body.licensePlate?.trim().toUpperCase(),
-      capacity: parseInt(req.body.capacity) || 0,
-      pricePerHour: parseFloat(req.body.pricePerHour) || 0,
-      pricePerKM: parseFloat(req.body.pricePerKM) || 0,
-      location: req.body.location?.trim(),
-      baseLocation: req.body.baseLocation?.trim(),
-      fuelType: req.body.fuelType?.trim(),
-      transmission: req.body.transmission?.trim(),
-      year: parseInt(req.body.year) || new Date().getFullYear(),
-      color: req.body.color?.trim(),
-      features,
-      images: processedImages,
-      isAvailable: req.body.isAvailable === 'true' || req.body.isAvailable === true,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-
-    // ---------------------- VALIDATION ----------------------
-    const errors = [];
-
-    if (!vehicleData.name) errors.push("Vehicle name is required");
-    if (!vehicleData.brand) errors.push("Brand is required");
-    if (!vehicleData.type) errors.push("Type is required");
-    if (!vehicleData.licensePlate) errors.push("License plate is required");
-    if (!vehicleData.pricePerKM || vehicleData.pricePerKM <= 0) {
-      errors.push("Price per KM must be greater than 0");
-    }
-    if (!vehicleData.pricePerHour || vehicleData.pricePerHour<= 0) {
-      errors.push("Price per Hour must be greater than 0");
-    }
-
-    // License plate regex (Indian RTO format e.g., KA01AB1234)
-    const licenseRegex = /^[A-Z]{2}[0-9]{2}[A-Z]{1,2}[0-9]{1,4}$/;
-    if (vehicleData.licensePlate && !licenseRegex.test(vehicleData.licensePlate)) {
-      errors.push("Invalid license plate format (expected: KA01AB1234)");
-    }
-
-    // Year validation
-    if (vehicleData.year < 1980 || vehicleData.year > new Date().getFullYear()) {
-      errors.push("Invalid manufacturing year");
-    }
-
-    if (errors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Validation failed",
-        details: errors
-      });
-    }
-
-    // ---------------------- DUPLICATE LICENSE CHECK ----------------------
-    const existingVehicle = await Vehicle.findOne({ licensePlate: vehicleData.licensePlate });
-    if (existingVehicle) {
-      return res.status(400).json({
-        success: false,
-        error: "Duplicate license plate",
-        details: "This license plate is already registered."
-      });
-    }
-
-    // ---------------------- SAVE VEHICLE ----------------------
+    uploadedImages = await processUploadedImages(req.files);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Image processing failed",
+      details: error.message
+    });
+  }
+  
+  const capacity = parseInt(req.body.capacity) || 4;
+  
+  const vehicleData = {
+    name: sanitizeString(req.body.name),
+    brand: sanitizeString(req.body.brand),
+    type: sanitizeString(req.body.type),
+    licensePlate,
+    capacity,
+    seats: capacity,
+    pricePerHour: parseFloat(req.body.pricePerHour) || 0,
+    pricePerKM: parseFloat(req.body.pricePerKM) || 0,
+    location: sanitizeString(req.body.location),
+    baseLocation: sanitizeString(req.body.baseLocation) || sanitizeString(req.body.location),
+    currentLocation: sanitizeString(req.body.currentLocation) || sanitizeString(req.body.location),
+    fuelType: sanitizeString(req.body.fuelType),
+    transmission: sanitizeString(req.body.transmission),
+    year: parseInt(req.body.year) || new Date().getFullYear(),
+    color: sanitizeString(req.body.color),
+    features: parseFeatures(req.body.features),
+    images: uploadedImages,
+    isAvailable: req.body.isAvailable === 'true' || req.body.isAvailable === true,
+    isBooked: false
+  };
+  
+  try {
     const vehicle = new Vehicle(vehicleData);
     await vehicle.save();
-
-    res.json({
+    
+    res.status(201).json({
       success: true,
-      message: `Vehicle added successfully with ${processedImages.length} images`,
-      vehicle,
-      storageType: 'database'
+      message: `Vehicle added successfully with ${uploadedImages.length} images`,
+      vehicle
     });
-  } catch (err) {
-    console.error('Error creating vehicle:', err);
+  } catch (error) {
+    deleteVehicleImages(uploadedImages);
+    throw error;
+  }
+}));
 
-    res.status(500).json({
+router.put("/vehicles/:id", authMiddleware, upload.array('images', MAX_FILES), asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const existingVehicle = await Vehicle.findById(req.params.id);
+  if (!existingVehicle) {
+    if (req.files) {
+      req.files.forEach(file => deleteFile(file.path));
+    }
+    return res.status(404).json({
       success: false,
-      error: "Failed to add vehicle",
-      details: err.message,
+      error: "Vehicle not found"
     });
   }
-});
-
-
-// Update Vehicle with Database Storage
-router.put("/vehicles/:id", authMiddleware, upload.array('images', 5), async (req, res) => {
+  
+  let newUploadedImages = [];
   try {
-    const existingVehicle = await Vehicle.findById(req.params.id);
-    if (!existingVehicle) {
-      return res.status(404).json({
-        success: false,
-        error: "Vehicle not found"
-      });
+    newUploadedImages = await processUploadedImages(req.files);
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: "Image processing failed",
+      details: error.message
+    });
+  }
+  
+  let allImages = [...(existingVehicle.images || [])];
+  let imagesToDelete = [];
+  
+  if (req.body.imagesToRemove) {
+    try {
+      const imagesToRemove = JSON.parse(req.body.imagesToRemove);
+      imagesToDelete = allImages.filter(img => imagesToRemove.includes(img.url));
+      allImages = allImages.filter(img => !imagesToRemove.includes(img.url));
+    } catch (error) {
+      console.error('Error parsing imagesToRemove:', error);
     }
-
-    console.log(`Updating vehicle ${req.params.id} with ${req.files?.length || 0} new images`);
-
-    // Handle new image uploads
-    const newProcessedImages = await processUploadedImages(req.files);
-    console.log(`Processed ${newProcessedImages.length} new images`);
-
-    // Keep existing images and add new ones
-    let allImages = [...(existingVehicle.images || [])];
-
-    if (newProcessedImages.length > 0) {
-      allImages = [...allImages, ...newProcessedImages];
-    }
-
-    // Handle image removal
-    if (req.body.imagesToRemove) {
-      try {
-        const imagesToRemove = JSON.parse(req.body.imagesToRemove);
-        console.log(`Removing ${imagesToRemove.length} images`);
-
-        // Filter out images to remove (base64 comparison)
-        allImages = allImages.filter(img => {
-          const imageUrl = getImageUrl(img);
-          return !imagesToRemove.includes(imageUrl);
-        });
-
-        console.log(`Remaining images: ${allImages.length}`);
-      } catch (parseError) {
-        console.error('Error parsing imagesToRemove:', parseError);
-      }
-    }
-
-    // Parse features
-    let features = existingVehicle.features;
-    if (req.body.features !== undefined) {
-      features = typeof req.body.features === 'string'
-        ? req.body.features.split(',').map(f => f.trim()).filter(f => f)
-        : req.body.features;
-    }
-
-    // Update vehicle data
-    const updateData = {
-      name: req.body.name?.trim() || existingVehicle.name,
-      brand: req.body.brand?.trim() || existingVehicle.brand,
-      type: req.body.type?.trim() || existingVehicle.type,
-      licensePlate: req.body.licensePlate?.trim().toUpperCase() || existingVehicle.licensePlate,
-      capacity: req.body.capacity ? parseInt(req.body.capacity) : existingVehicle.capacity,
-      pricePerHour: req.body.pricePerHour ? parseFloat(req.body.pricePerHour) : existingVehicle.pricePerHour,
-            pricePerKM: req.body.pricePerKM ? parseFloat(req.body.pricePerKM) : existingVehicle.pricePerKM,
-      baseLocation: req.body.location?.trim() || existingVehicle.location,
-      fuelType: req.body.fuelType?.trim() || existingVehicle.fuelType,
-      transmission: req.body.transmission?.trim() || existingVehicle.transmission,
-      year: req.body.year ? parseInt(req.body.year) : existingVehicle.year,
-      color: req.body.color?.trim() || existingVehicle.color,
-      features: features,
-      images: allImages,
-      isAvailable: req.body.isAvailable !== undefined ?
-        (req.body.isAvailable === 'true' || req.body.isAvailable === true) :
-        existingVehicle.isAvailable,
-      updatedAt: new Date()
-    };
-
-    const vehicle = await Vehicle.findByIdAndUpdate(req.params.id, updateData, { new: true });
-
+  }
+  
+  allImages = [...allImages, ...newUploadedImages].slice(0, MAX_FILES);
+  
+  const capacity = req.body.capacity ? parseInt(req.body.capacity) : existingVehicle.capacity;
+  
+  const updateData = {
+    name: sanitizeString(req.body.name) || existingVehicle.name,
+    brand: sanitizeString(req.body.brand) || existingVehicle.brand,
+    type: sanitizeString(req.body.type) || existingVehicle.type,
+    licensePlate: (sanitizeString(req.body.licensePlate) || existingVehicle.licensePlate).toUpperCase(),
+    capacity,
+    seats: capacity,
+    pricePerHour: req.body.pricePerHour ? parseFloat(req.body.pricePerHour) : existingVehicle.pricePerHour,
+    pricePerKM: req.body.pricePerKM ? parseFloat(req.body.pricePerKM) : existingVehicle.pricePerKM,
+    location: sanitizeString(req.body.location) || existingVehicle.location,
+    baseLocation: sanitizeString(req.body.baseLocation) || existingVehicle.baseLocation,
+    currentLocation: sanitizeString(req.body.currentLocation) || existingVehicle.currentLocation,
+    fuelType: sanitizeString(req.body.fuelType) || existingVehicle.fuelType,
+    transmission: sanitizeString(req.body.transmission) || existingVehicle.transmission,
+    year: req.body.year ? parseInt(req.body.year) : existingVehicle.year,
+    color: sanitizeString(req.body.color) || existingVehicle.color,
+    features: req.body.features !== undefined ? parseFeatures(req.body.features) : existingVehicle.features,
+    images: allImages,
+    isAvailable: req.body.isAvailable !== undefined
+      ? (req.body.isAvailable === 'true' || req.body.isAvailable === true)
+      : existingVehicle.isAvailable,
+    updatedAt: new Date()
+  };
+  
+  try {
+    const vehicle = await Vehicle.findByIdAndUpdate(
+      req.params.id, 
+      updateData, 
+      { new: true, runValidators: true }
+    );
+    
+    deleteVehicleImages(imagesToDelete);
+    
     res.json({
       success: true,
       message: "Vehicle updated successfully",
       vehicle
     });
-  } catch (err) {
-    console.error('Error updating vehicle:', err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to update vehicle",
-      details: err.message,
-    });
+  } catch (error) {
+    deleteVehicleImages(newUploadedImages);
+    throw error;
   }
-});
+}));
 
-// Delete single image from vehicle
-router.delete("/vehicles/:id/images", authMiddleware, async (req, res) => {
-  try {
-    const { imageUrl } = req.body;
-
-    const vehicle = await Vehicle.findById(req.params.id);
-    if (!vehicle) {
-      return res.status(404).json({
-        success: false,
-        error: "Vehicle not found"
-      });
-    }
-
-    // Remove image from array by comparing base64 data
-    const originalCount = vehicle.images.length;
-    vehicle.images = vehicle.images.filter(img => {
-      const imgUrl = getImageUrl(img);
-      return imgUrl !== imageUrl;
-    });
-
-    if (vehicle.images.length < originalCount) {
-      await vehicle.save();
-      console.log('Single image deleted successfully');
-    }
-
-    res.json({
-      success: true,
-      message: "Image deleted successfully",
-      vehicle
-    });
-  } catch (err) {
-    console.error('Error deleting image:', err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to delete image",
-      details: err.message,
-    });
-  }
-});
-
-// Delete Vehicle
-router.delete("/vehicles/:id", authMiddleware, async (req, res) => {
-  try {
-    const vehicle = await Vehicle.findById(req.params.id);
-    if (!vehicle) return res.status(404).json({
+router.delete("/vehicles/:id", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const vehicle = await Vehicle.findById(req.params.id);
+  if (!vehicle) {
+    return res.status(404).json({
       success: false,
       error: "Vehicle not found"
     });
-
-    // Check for active bookings
-    const activeBookings = await Booking.countDocuments({
-      vehicle: req.params.id,
-      status: { $in: ['Pending', 'Confirmed'] }
-    });
-
-    if (activeBookings > 0) {
-      return res.status(400).json({
-        success: false,
-        error: "Cannot delete vehicle with active bookings",
-        details: `Vehicle has ${activeBookings} active booking(s)`
-      });
-    }
-
-    // Delete vehicle from database (images are automatically deleted as they're stored in the document)
-    await Vehicle.findByIdAndDelete(req.params.id);
-    console.log(`Vehicle ${vehicle.name} and its images deleted successfully`);
-
-    res.json({
-      success: true,
-      message: "Vehicle deleted successfully"
-    });
-  } catch (err) {
-    console.error('Error deleting vehicle:', err);
-    res.status(500).json({
+  }
+  
+  const activeBookings = await Booking.countDocuments({
+    vehicle: req.params.id,
+    status: { $in: ['Pending', 'Confirmed'] }
+  });
+  
+  if (activeBookings > 0) {
+    return res.status(400).json({
       success: false,
-      error: "Failed to delete vehicle",
-      details: err.message,
+      error: "Cannot delete vehicle with active bookings",
+      details: `Vehicle has ${activeBookings} active booking(s)`
     });
   }
-});
+  
+  deleteVehicleImages(vehicle.images);
+  await Vehicle.findByIdAndDelete(req.params.id);
+  
+  res.json({
+    success: true,
+    message: "Vehicle deleted successfully"
+  });
+}));
 
-// Toggle Vehicle Availability
-router.patch("/vehicles/:id/toggle-availability", authMiddleware, async (req, res) => {
-  try {
-    const vehicle = await Vehicle.findById(req.params.id);
-    if (!vehicle) return res.status(404).json({
+router.patch("/vehicles/:id/toggle-availability", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const vehicle = await Vehicle.findById(req.params.id);
+  if (!vehicle) {
+    return res.status(404).json({
       success: false,
       error: "Vehicle not found"
     });
-
-    vehicle.isAvailable = !vehicle.isAvailable;
-    vehicle.updatedAt = new Date();
-    await vehicle.save();
-
-    res.json({
-      success: true,
-      message: `Vehicle ${vehicle.isAvailable ? "made available" : "made unavailable"} successfully`,
-      vehicle: {
-        _id: vehicle._id,
-        name: vehicle.name,
-        licensePlate: vehicle.licensePlate,
-        isAvailable: vehicle.isAvailable
-      }
-    });
-  } catch (err) {
-    console.error('Error toggling vehicle availability:', err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to toggle vehicle availability",
-      details: err.message,
-    });
   }
-});
+  
+  vehicle.isAvailable = !vehicle.isAvailable;
+  vehicle.updatedAt = new Date();
+  await vehicle.save();
+  
+  res.json({
+    success: true,
+    message: `Vehicle ${vehicle.isAvailable ? "made available" : "made unavailable"}`,
+    vehicle: {
+      _id: vehicle._id,
+      name: vehicle.name,
+      licensePlate: vehicle.licensePlate,
+      isAvailable: vehicle.isAvailable
+    }
+  });
+}));
 
 /* =========================================================
-   BOOKING MANAGEMENT
+   BOOKING MANAGEMENT ROUTES
 ========================================================= */
 
-// Get all bookings
-router.get("/bookings", authMiddleware, async (req, res) => {
-  try {
-    const bookings = await Booking.find()
-      .populate("user", "name email")
-      .populate("vehicle", "name brand type licensePlate");
+router.get("/bookings", authMiddleware, asyncHandler(async (req, res) => {
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 50;
+  const skip = (page - 1) * limit;
+  const status = req.query.status;
+  
+  const query = status ? { status } : {};
+  
+  const [bookings, totalBookings] = await Promise.all([
+    Booking.find(query)
+      .populate("user", "name email phone")
+      .populate("vehicle", "name brand type licensePlate")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
+    Booking.countDocuments(query)
+  ]);
+  
+  res.json({
+    success: true,
+    bookings,
+    pagination: {
+      page,
+      limit,
+      totalPages: Math.ceil(totalBookings / limit),
+      totalBookings
+    }
+  });
+}));
 
-    res.json({
-      success: true,
-      bookings: bookings
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch bookings",
-      details: err.message,
-    });
-  }
-});
-
-// Update booking status
-router.put("/bookings/:id/status", authMiddleware, async (req, res) => {
-  try {
-    const { status } = req.body;
-    const booking = await Booking.findByIdAndUpdate(
-      req.params.id,
-      { status, updatedAt: new Date() },
-      { new: true }
-    );
-
-    if (!booking) return res.status(404).json({
+router.get("/bookings/:id", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const booking = await Booking.findById(req.params.id)
+    .populate("user", "name email phone")
+    .populate("vehicle", "name brand type licensePlate images")
+    .lean();
+  
+  if (!booking) {
+    return res.status(404).json({
       success: false,
       error: "Booking not found"
     });
+  }
+  
+  res.json({
+    success: true,
+    booking
+  });
+}));
 
-    res.json({
-      success: true,
-      message: "Booking status updated",
-      booking
-    });
-  } catch (err) {
-    res.status(500).json({
+router.put("/bookings/:id/status", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const { status } = req.body;
+  const validStatuses = ['Pending', 'Confirmed', 'Completed', 'Cancelled'];
+  
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({
       success: false,
-      error: "Failed to update booking",
-      details: err.message,
+      error: "Invalid status",
+      validStatuses
     });
   }
-});
-
-/* =========================================================
-   PAYMENTS MANAGEMENT
-========================================================= */
-
-// Get all payments
-router.get("/payments", authMiddleware, async (req, res) => {
-  try {
-    const payments = await Booking.find()
-      .populate("user", "name email")
-      .populate("vehicle", "name brand type licensePlate")
-      .select("payment.totalPrice payment.amount payment.status bookingCode createdAt");
-
-    // Simplify response to only return amount + user + vehicle
-    const formatted = payments.map(p => ({
-      bookingCode: p.bookingCode,
-      amountPaid: p.payment?.amount || 0,
-      paymentStatus: p.payment?.status,
-      user: p.user,
-      vehicle: p.vehicle,
-      createdAt: p.createdAt
-    }));
-
-    res.json({
-      success: true,
-      payments: formatted
-    });
-  } catch (err) {
-    res.status(500).json({
+  
+  const booking = await Booking.findByIdAndUpdate(
+    req.params.id,
+    { status, updatedAt: new Date() },
+    { new: true }
+  ).populate("user", "name email")
+   .populate("vehicle", "name brand");
+  
+  if (!booking) {
+    return res.status(404).json({
       success: false,
-      error: "Failed to fetch payments",
-      details: err.message,
+      error: "Booking not found"
     });
   }
-});
+  
+  res.json({
+    success: true,
+    message: `Booking status updated to ${status}`,
+    booking
+  });
+}));
+
+router.delete("/bookings/:id", authMiddleware, asyncHandler(async (req, res) => {
+  validateObjectId(req.params.id);
+  
+  const booking = await Booking.findById(req.params.id);
+  if (!booking) {
+    return res.status(404).json({
+      success: false,
+      error: "Booking not found"
+    });
+  }
+  
+  if (booking.status === 'Confirmed') {
+    return res.status(400).json({
+      success: false,
+      error: "Cannot delete confirmed booking",
+      details: "Please cancel the booking first"
+    });
+  }
+  
+  await Booking.findByIdAndDelete(req.params.id);
+  
+  res.json({
+    success: true,
+    message: "Booking deleted successfully"
+  });
+}));
 
 /* =========================================================
-   SYSTEM INFORMATION
+   ANALYTICS & DASHBOARD
 ========================================================= */
 
-// Get system information
-router.get("/system/info", authMiddleware, async (req, res) => {
-  try {
-    const totalUsers = await User.countDocuments();
-    const totalVehicles = await Vehicle.countDocuments();
-    const totalBookings = await Booking.countDocuments();
-    const activeUsers = await User.countDocuments({ isActive: true });
-    const availableVehicles = await Vehicle.countDocuments({ isAvailable: true });
-    const pendingBookings = await Booking.countDocuments({ status: 'Pending' });
-
-    res.json({
-      success: true,
-      system: {
-        users: {
-          total: totalUsers,
-          active: activeUsers,
-          inactive: totalUsers - activeUsers
-        },
-        vehicles: {
-          total: totalVehicles,
-          available: availableVehicles,
-          unavailable: totalVehicles - availableVehicles
-        },
-        bookings: {
-          total: totalBookings,
-          pending: pendingBookings,
-          completed: totalBookings - pendingBookings
-        },
-        storage: {
-          type: 'database',
-          configured: true
-        },
-        environment: process.env.NODE_ENV || 'development',
-        timestamp: new Date()
+router.get("/dashboard/stats", authMiddleware, asyncHandler(async (req, res) => {
+  const [
+    totalUsers,
+    totalVehicles,
+    totalBookings,
+    activeBookings,
+    completedBookings,
+    revenue,
+    recentBookings
+  ] = await Promise.all([
+    User.countDocuments(),
+    Vehicle.countDocuments(),
+    Booking.countDocuments(),
+    Booking.countDocuments({ status: { $in: ['Pending', 'Confirmed'] } }),
+    Booking.countDocuments({ status: 'Completed' }),
+    Booking.aggregate([
+      {
+        $match: {
+          status: 'Completed',
+          'payment.status': 'Success'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$payment.amount' }
+        }
       }
-    });
-  } catch (err) {
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch system information",
-      details: err.message,
-    });
-  }
-});
+    ]),
+    Booking.find()
+      .populate('user', 'name email')
+      .populate('vehicle', 'name brand licensePlate')
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .lean()
+  ]);
+  
+  res.json({
+    success: true,
+    stats: {
+      totalUsers,
+      totalVehicles,
+      totalBookings,
+      activeBookings,
+      completedBookings,
+      totalRevenue: revenue.length > 0 ? revenue[0].total : 0,
+      recentBookings
+    }
+  });
+}));
+
+/* =========================================================
+   ERROR HANDLER
+========================================================= */
 
 export default router;

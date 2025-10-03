@@ -1,76 +1,73 @@
 import mongoose from "mongoose";
 
+// Image schema for Cloudinary
+const imageSchema = new mongoose.Schema(
+  {
+    url: { type: String, required: true },            // secure_url from Cloudinary
+    public_id: { type: String, required: true },      // public_id (for deletion/replacement)
+    format: { type: String },                         // jpg, png, webp, etc.
+    bytes: { type: Number },                          // file size in bytes
+    uploadedAt: { type: Date, default: Date.now }
+  },
+  { _id: false }
+);
+
 const vehicleSchema = new mongoose.Schema(
   {
-    // 🔹 Basic vehicle details
+    // Basic vehicle details
     name: { type: String, required: true },
     brand: { type: String, required: true },
     type: {
       type: String,
       enum: [
-        "sedan",
-        "SUV",
-        "Bike",
-        "Convertible",
-        "Truck",
-        "Van",
-        "Coupe",
-        "Wagon",
-        "Other",
+        "sedan", "SUV", "suv", "Bike", "bike", "Convertible", "convertible",
+        "Truck", "truck", "Van", "van", "Coupe", "coupe", "Wagon", "wagon",
+        "hatchback", "motorcycle", "Other",
       ],
       required: true,
     },
     seats: { type: Number, default: 4 },
-   pricePerKM: {
-  type: Number,
-  required: false,   // <-- change from true → false
-  default: null      // so it won’t throw error if missing
-},
-
+    capacity: { type: Number, default: 4 },
+    pricePerKM: { type: Number, default: null },
     pricePerHour: { type: Number },
-     // ✅ added daily price
 
-    // 🔹 Availability
-    available: { type: Boolean, default: true },
+    // Availability
+    isAvailable: { type: Boolean, default: true },
     isBooked: { type: Boolean, default: false },
 
-    // 🔹 Current booking details (if booked)
+    // Booking details
     bookedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     bookedByName: { type: String, default: null },
 
-    // 🔹 Travel details
+    // Travel details
     origin: { type: String, default: null },
     destination: { type: String, default: null },
     isRoundTrip: { type: Boolean, default: false },
     baseLocation: { type: String },
-    // 🔹 Location tracking
-    baseLocation: { type: String },
     currentLocation: { type: String },
+    location: { type: String },
 
-    // 🔹 Extra details
-    images: [
-    {
-      fileId: { type: mongoose.Schema.Types.ObjectId },
-      filename: String,
-      originalName: String,
-      contentType: String,
-      size: Number,
-      storageType: { type: String, default: "gridfs" },
-      uploadedAt: Date,
-    },
-  ],
+    // ✅ Cloudinary images
+    images: { type: [imageSchema], default: [] },
+
+    // Extra details
     features: { type: [String], default: [] },
     licensePlate: { type: String, unique: true },
     mileage: { type: Number },
     description: { type: String },
+
+    // Additional fields
+    fuelType: { type: String },
+    transmission: { type: String },
+    year: { type: Number },
+    color: { type: String },
   },
   { timestamps: true }
 );
 
-// Indexes (for faster queries)
-vehicleSchema.index({ available: 1 });
+// Indexes
+vehicleSchema.index({ isAvailable: 1 });
 vehicleSchema.index({ type: 1 });
 vehicleSchema.index({ currentLocation: 1 });
 
-// ✅ Use existing model if compiled to prevent overwrite error
 export default mongoose.models.Vehicle || mongoose.model("Vehicle", vehicleSchema);

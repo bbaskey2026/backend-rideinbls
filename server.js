@@ -5,7 +5,7 @@ import morgan from "morgan";
 import cors from "cors";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
-
+import imageRoutes from "./routes/imageRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import vehicleRoutes from "./routes/vehicleRoutes.js";
 import googleRoutes from "./routes/googleRoutes.js";
@@ -99,7 +99,7 @@ app.use("/api/vehicles", vehicleRoutes);
 app.use("/api", protectedRoute);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/admin", adminRoutes);
-
+app.use("/api/images", imageRoutes);
 // Root API check
 app.get("/", (req, res) => {
   res.send("🚀 API is running...");

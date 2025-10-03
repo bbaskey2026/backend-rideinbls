@@ -15,6 +15,7 @@ const isValidObjectId = (id) => mongoose.Types.ObjectId.isValid(id);
 
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL; // Add this to your .env file
 
 const razorpay = new Razorpay({
   key_id: RAZORPAY_KEY_ID,
@@ -27,18 +28,220 @@ const sendResponse = (res, status, success, message, data = null) => {
 };
 
 // Configure Nodemailer (Gmail example)
-const transporter = nodemailer.createTransport({  // ✅ createTransport (not createTransporter)
+const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
 });
+
 // Utility to generate unique booking code
 const generateBookingCode = () => {
   const randomStr = Math.random().toString(36).substring(2, 8).toUpperCase();
   const dateStr = new Date().toISOString().replace(/[-:.TZ]/g, "").substring(0, 14);
   return `BLS${randomStr}${dateStr}`;
+};
+
+// Utility to send admin notification email
+const sendAdminNotification = async (bookingDetails, userDetails) => {
+  try {
+    const adminMailOptions = {
+      from: `"RideInBalasore Booking System" <${process.env.EMAIL_USER}>`,
+      to: ADMIN_EMAIL,
+      subject: `🚗 New Booking Alert - ${bookingDetails.bookingCode}`,
+      html: `
+        <!DOCTYPE html>
+        <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>New Booking Notification</title>
+            <style>
+              @media only screen and (max-width: 600px) {
+                .container { padding: 15px !important; }
+                h2 { font-size: 20px !important; }
+                p, td { font-size: 14px !important; }
+              }
+            </style>
+          </head>
+          <body style="margin:0; padding:0; font-family: Arial, sans-serif; background-color:#f4f4f4;">
+            <table width="100%" cellpadding="0" cellspacing="0" style="padding:20px 0; background-color:#f4f4f4;">
+              <tr>
+                <td>
+                  <table class="container" width="100%" style="max-width:650px; margin:auto; background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 4px 8px rgba(0,0,0,0.1);">
+
+                    <!-- Header -->
+                    <tr>
+                      <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color:#ffffff; padding:25px; text-align:center;">
+                        <h2 style="margin:0; font-size:24px;">🚗 New Booking Received!</h2>
+                        <p style="margin:8px 0 0 0; font-size:14px; opacity:0.9;">RideInBalasore Admin Dashboard</p>
+                      </td>
+                    </tr>
+
+                    <!-- Alert Banner -->
+                    <tr>
+                      <td style="background-color:#fff3cd; padding:15px; border-left:4px solid #ffc107;">
+                        <p style="margin:0; color:#856404; font-weight:bold;">⚡ Action Required: New booking needs your attention</p>
+                      </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                      <td style="padding:25px; color:#333;">
+                        <p style="font-size:16px; margin-top:0;">Dear Admin,</p>
+                        <p>A new vehicle booking has been successfully confirmed. Please review the details below:</p>
+
+                        <!-- Booking Information -->
+                        <h3 style="border-bottom:2px solid #667eea; padding-bottom:8px; color:#667eea; font-size:18px; margin-top:25px;">📋 Booking Information</h3>
+                        <table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse; margin-top:15px; background-color:#f8f9fa;">
+                          <tr>
+                            <td style="border:1px solid #dee2e6; width:40%; font-weight:bold; background-color:#e9ecef;">Booking Code</td>
+                            <td style="border:1px solid #dee2e6; color:#667eea; font-weight:bold; font-size:16px;">${bookingDetails.bookingCode}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Booking Type</td>
+                            <td style="border:1px solid #dee2e6;">
+                              <span style="background-color:${bookingDetails.bookingType === 'immediate' ? '#28a745' : '#17a2b8'}; color:white; padding:4px 12px; border-radius:12px; font-size:12px; font-weight:bold;">
+                                ${bookingDetails.bookingType === 'immediate' ? '⚡ IMMEDIATE' : '📅 SCHEDULED'}
+                              </span>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Status</td>
+                            <td style="border:1px solid #dee2e6;">
+                              <span style="background-color:#28a745; color:white; padding:4px 12px; border-radius:12px; font-size:12px; font-weight:bold;">
+                                ✓ CONFIRMED
+                              </span>
+                            </td>
+                          </tr>
+                        </table>
+
+                        <!-- Customer Information -->
+                        <h3 style="border-bottom:2px solid #667eea; padding-bottom:8px; color:#667eea; font-size:18px; margin-top:25px;">👤 Customer Information</h3>
+                        <table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse; margin-top:15px; background-color:#f8f9fa;">
+                          <tr>
+                            <td style="border:1px solid #dee2e6; width:40%; font-weight:bold; background-color:#e9ecef;">Name</td>
+                            <td style="border:1px solid #dee2e6;">${userDetails.name || 'N/A'}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Email</td>
+                            <td style="border:1px solid #dee2e6;">${userDetails.email}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Phone</td>
+                            <td style="border:1px solid #dee2e6;">${userDetails.mobile || 'Not provided'}</td>
+                          </tr>
+                        </table>
+
+                        <!-- Vehicle & Trip Details -->
+                        <h3 style="border-bottom:2px solid #667eea; padding-bottom:8px; color:#667eea; font-size:18px; margin-top:25px;">🚙 Vehicle & Trip Details</h3>
+                        <table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse; margin-top:15px; background-color:#f8f9fa;">
+                          <tr>
+                            <td style="border:1px solid #dee2e6; width:40%; font-weight:bold; background-color:#e9ecef;">Vehicle</td>
+                            <td style="border:1px solid #dee2e6;">${bookingDetails.vehicle.name} (${bookingDetails.vehicle.brand})</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Vehicle Type</td>
+                            <td style="border:1px solid #dee2e6;">${bookingDetails.vehicle.type}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">License Plate</td>
+                            <td style="border:1px solid #dee2e6;">${bookingDetails.vehicle.licensePlate || 'N/A'}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Origin</td>
+                            <td style="border:1px solid #dee2e6;">📍 ${bookingDetails.origin}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Destination</td>
+                            <td style="border:1px solid #dee2e6;">📍 ${bookingDetails.destination}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Trip Type</td>
+                            <td style="border:1px solid #dee2e6;">${bookingDetails.isRoundTrip ? '🔄 Round Trip' : '➡️ One Way'}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Start Date/Time</td>
+                            <td style="border:1px solid #dee2e6;">🕐 ${bookingDetails.startDate ? new Date(bookingDetails.startDate).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'N/A'}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">End Date/Time</td>
+                            <td style="border:1px solid #dee2e6;">🕐 ${bookingDetails.endDate ? new Date(bookingDetails.endDate).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : 'N/A'}</td>
+                          </tr>
+                        </table>
+
+                        <!-- Payment Information -->
+                        <h3 style="border-bottom:2px solid #667eea; padding-bottom:8px; color:#667eea; font-size:18px; margin-top:25px;">💳 Payment Information</h3>
+                        <table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse; margin-top:15px; background-color:#f8f9fa;">
+                          <tr>
+                            <td style="border:1px solid #dee2e6; width:40%; font-weight:bold; background-color:#e9ecef;">Total Amount</td>
+                            <td style="border:1px solid #dee2e6; color:#28a745; font-weight:bold; font-size:18px;">₹${bookingDetails.totalPrice}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Payment Status</td>
+                            <td style="border:1px solid #dee2e6;">
+                              <span style="background-color:#28a745; color:white; padding:4px 12px; border-radius:12px; font-size:12px; font-weight:bold;">
+                                ✓ PAID
+                              </span>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Payment ID</td>
+                            <td style="border:1px solid #dee2e6; font-family:monospace; font-size:12px;">${bookingDetails.payment.providerPaymentId}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Order ID</td>
+                            <td style="border:1px solid #dee2e6; font-family:monospace; font-size:12px;">${bookingDetails.payment.orderId}</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Payment Method</td>
+                            <td style="border:1px solid #dee2e6;">Razorpay</td>
+                          </tr>
+                          <tr>
+                            <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Booking Date</td>
+                            <td style="border:1px solid #dee2e6;">${new Date(bookingDetails.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</td>
+                          </tr>
+                        </table>
+
+                        <!-- Action Required -->
+                        <div style="background-color:#e3f2fd; border-left:4px solid #2196f3; padding:15px; margin-top:25px; border-radius:4px;">
+                          <p style="margin:0; color:#0d47a1; font-weight:bold;">📞 Next Steps:</p>
+                          <ul style="margin:10px 0 0 20px; color:#1565c0;">
+                            <li>Assign a driver for this booking</li>
+                            <li>Contact the customer at ${userDetails.email}${userDetails.phone ? ` or ${userDetails.phone}` : ''}</li>
+                            <li>${bookingDetails.bookingType === 'immediate' ? 'Arrange immediate pickup' : 'Schedule pickup as per booking time'}</li>
+                            <li>Update vehicle status in the system</li>
+                          </ul>
+                        </div>
+
+                      </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                      <td style="background-color:#667eea; color:#ffffff; text-align:center; padding:20px; font-size:12px;">
+                        <p style="margin:0;">This is an automated notification from RideInBalasore Booking System</p>
+                        <p style="margin:8px 0 0 0; opacity:0.8;">&copy; ${new Date().getFullYear()} RideInBalasore. All rights reserved.</p>
+                      </td>
+                    </tr>
+
+                  </table>
+                </td>
+              </tr>
+            </table>
+          </body>
+        </html>
+      `,
+    };
+
+    await transporter.sendMail(adminMailOptions);
+    console.log("Admin notification email sent successfully");
+    return true;
+  } catch (error) {
+    console.error("Failed to send admin notification:", error);
+    return false;
+  }
 };
 
 // ----------------------
@@ -58,17 +261,16 @@ router.post("/create-order", authMiddleware, async (req, res) => {
     if (!origin || !destination)
       return sendResponse(res, 400, false, "Origin and destination are required");
 
-    // Enhanced date validation
+    // Simple date handling
     const hasStartDate = startDate && startDate.trim() !== "" && startDate !== "null" && startDate !== "undefined";
     const hasEndDate = endDate && endDate.trim() !== "" && endDate !== "null" && endDate !== "undefined";
 
-    // Process dates based on what's provided
     let processedStartDate = null;
     let processedEndDate = null;
     let bookingType = "immediate";
 
     if (!hasStartDate && !hasEndDate) {
-      // Immediate booking - set current time
+      // Immediate booking
       processedStartDate = new Date();
       processedEndDate = null;
       bookingType = "immediate";
@@ -76,38 +278,15 @@ router.post("/create-order", authMiddleware, async (req, res) => {
     else if (hasStartDate && hasEndDate) {
       const start = new Date(startDate);
       const end = new Date(endDate);
-      const now = new Date();
 
-      // Validate date objects
+      // Basic date validation
       if (isNaN(start.getTime()) || isNaN(end.getTime())) {
         return sendResponse(res, 400, false, "Invalid date format");
       }
 
-      // Check if dates are not from 1970
-      if (start.getFullYear() < 2020 || end.getFullYear() < 2020) {
-        return sendResponse(res, 400, false, "Invalid date - dates appear to be incorrect");
-      }
-
-      // Check if start time is in the future (5 minute buffer)
-      const minStartTime = new Date(now.getTime() + 5 * 60 * 1000);
-      if (start < minStartTime) {
-        return sendResponse(res, 400, false, "Start time must be at least 5 minutes in the future");
-      }
-
-      // Check if end time is after start time
+      // Only check if end is after start
       if (end <= start) {
         return sendResponse(res, 400, false, "End time must be after start time");
-      }
-
-      // Check minimum duration (1 hour)
-      const durationInHours = (end - start) / (1000 * 60 * 60);
-      if (durationInHours < 1) {
-        return sendResponse(res, 400, false, "Minimum booking duration is 1 hour");
-      }
-
-      // Check maximum duration (30 days)
-      if (durationInHours > 720) {
-        return sendResponse(res, 400, false, "Maximum booking duration is 30 days");
       }
 
       processedStartDate = start;
@@ -115,7 +294,7 @@ router.post("/create-order", authMiddleware, async (req, res) => {
       bookingType = "scheduled";
     }
     else {
-      // Only one date provided - error
+      // Only one date provided
       return sendResponse(res, 400, false, "Please provide both start and end dates or leave both empty for immediate booking");
     }
 
@@ -129,7 +308,7 @@ router.post("/create-order", authMiddleware, async (req, res) => {
       return sendResponse(res, 400, false, "Vehicle is not available for booking");
     }
 
-    // For scheduled bookings, check for conflicts
+    // Check for booking conflicts (simplified)
     if (bookingType === "scheduled") {
       const conflictingBooking = await BookingPayment.findOne({
         vehicle: vehicleId,
@@ -154,6 +333,8 @@ router.post("/create-order", authMiddleware, async (req, res) => {
         return sendResponse(res, 400, false, "Vehicle is already booked for the selected time period");
       }
     }
+
+    // Continue with order creation...
 
     // Generate booking code for order receipt
     const bookingCode = generateBookingCode();
@@ -336,7 +517,7 @@ router.post("/verify", authMiddleware, async (req, res) => {
         return bookingPayment[0];
       });
 
-      // Send confirmation email AFTER successful booking creation
+      // Send confirmation email to customer
       try {
         const mailOptions = {
           from: process.env.EMAIL_USER,
@@ -401,6 +582,14 @@ router.post("/verify", authMiddleware, async (req, res) => {
       } catch (emailError) {
         console.error("Email sending error:", emailError);
         // Don't fail the entire transaction for email issues
+      }
+
+      // 🚀 SEND ADMIN NOTIFICATION EMAIL
+      try {
+        await sendAdminNotification(result, req.user);
+      } catch (adminEmailError) {
+        console.error("Admin notification error:", adminEmailError);
+        // Don't fail the transaction if admin email fails
       }
 
       return sendResponse(res, 200, true, "Payment verified and booking confirmed successfully", { 
@@ -564,7 +753,7 @@ router.post("/cancel-by-vehicle/:bookingCode", authMiddleware, async (req, res) 
     if (bookingPayment.vehicle) {
       const vehicle = bookingPayment.vehicle;
       vehicle.isAvailable = true;
-      vehicle.available = true;
+      vehicle.isAvailable = true;
       vehicle.isBooked = false;
       vehicle.bookedBy = null;
       vehicle.bookedByName = null;
@@ -579,7 +768,7 @@ router.post("/cancel-by-vehicle/:bookingCode", authMiddleware, async (req, res) 
     }
     await bookingPayment.save();
 
-    // Send cancellation email
+    // Send cancellation email to customer
     try {
       const mailOptions = {
   from: `"RideInBalasore" <${process.env.EMAIL_USER}>`,
@@ -677,6 +866,157 @@ router.post("/cancel-by-vehicle/:bookingCode", authMiddleware, async (req, res) 
       console.log("Cancellation email sent successfully");
     } catch (emailErr) {
       console.error("Failed to send cancellation email:", emailErr);
+    }
+
+    // 🚀 SEND ADMIN NOTIFICATION ABOUT CANCELLATION
+    try {
+      const adminCancellationEmail = {
+        from: `"RideInBalasore Booking System" <${process.env.EMAIL_USER}>`,
+        to: ADMIN_EMAIL,
+        subject: `⚠️ Booking Cancelled - ${bookingPayment.bookingCode}`,
+        html: `
+          <!DOCTYPE html>
+          <html lang="en">
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>Booking Cancellation Notification</title>
+            </head>
+            <body style="margin:0; padding:0; font-family: Arial, sans-serif; background-color:#f4f4f4;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="padding:20px 0; background-color:#f4f4f4;">
+                <tr>
+                  <td>
+                    <table width="100%" style="max-width:650px; margin:auto; background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 4px 8px rgba(0,0,0,0.1);">
+
+                      <!-- Header -->
+                      <tr>
+                        <td style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color:#ffffff; padding:25px; text-align:center;">
+                          <h2 style="margin:0; font-size:24px;">⚠️ Booking Cancelled</h2>
+                          <p style="margin:8px 0 0 0; font-size:14px; opacity:0.9;">RideInBalasore Admin Dashboard</p>
+                        </td>
+                      </tr>
+
+                      <!-- Alert Banner -->
+                      <tr>
+                        <td style="background-color:#fff3cd; padding:15px; border-left:4px solid #ffc107;">
+                          <p style="margin:0; color:#856404; font-weight:bold;">📢 A booking has been cancelled by the customer</p>
+                        </td>
+                      </tr>
+
+                      <!-- Body -->
+                      <tr>
+                        <td style="padding:25px; color:#333;">
+                          <p style="font-size:16px; margin-top:0;">Dear Admin,</p>
+                          <p>A customer has cancelled their vehicle booking. Please review the details below:</p>
+
+                          <!-- Cancellation Details -->
+                          <h3 style="border-bottom:2px solid #e74c3c; padding-bottom:8px; color:#e74c3c; font-size:18px; margin-top:25px;">🚫 Cancellation Information</h3>
+                          <table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse; margin-top:15px; background-color:#f8f9fa;">
+                            <tr>
+                              <td style="border:1px solid #dee2e6; width:40%; font-weight:bold; background-color:#e9ecef;">Booking Code</td>
+                              <td style="border:1px solid #dee2e6; color:#e74c3c; font-weight:bold; font-size:16px;">${bookingPayment.bookingCode}</td>
+                            </tr>
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Cancellation Time</td>
+                              <td style="border:1px solid #dee2e6;">${new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</td>
+                            </tr>
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Refund Status</td>
+                              <td style="border:1px solid #dee2e6;">
+                                <span style="background-color:${refundInfo ? '#28a745' : '#dc3545'}; color:white; padding:4px 12px; border-radius:12px; font-size:12px; font-weight:bold;">
+                                  ${refundInfo ? '✓ REFUND INITIATED' : '✗ NO REFUND'}
+                                </span>
+                              </td>
+                            </tr>
+                            ${refundInfo ? `
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Refund Amount</td>
+                              <td style="border:1px solid #dee2e6; color:#28a745; font-weight:bold;">₹${bookingPayment.payment.amount}</td>
+                            </tr>
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Refund ID</td>
+                              <td style="border:1px solid #dee2e6; font-family:monospace; font-size:12px;">${refundInfo.id}</td>
+                            </tr>
+                            ` : ''}
+                          </table>
+
+                          <!-- Customer Information -->
+                          <h3 style="border-bottom:2px solid #e74c3c; padding-bottom:8px; color:#e74c3c; font-size:18px; margin-top:25px;">👤 Customer Information</h3>
+                          <table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse; margin-top:15px; background-color:#f8f9fa;">
+                            <tr>
+                              <td style="border:1px solid #dee2e6; width:40%; font-weight:bold; background-color:#e9ecef;">Name</td>
+                              <td style="border:1px solid #dee2e6;">${req.user.name || 'N/A'}</td>
+                            </tr>
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Email</td>
+                              <td style="border:1px solid #dee2e6;">${req.user.email}</td>
+                            </tr>
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Phone</td>
+                              <td style="border:1px solid #dee2e6;">${req.user.mobile || 'Not provided'}</td>
+                            </tr>
+                          </table>
+
+                          <!-- Original Booking Details -->
+                          <h3 style="border-bottom:2px solid #e74c3c; padding-bottom:8px; color:#e74c3c; font-size:18px; margin-top:25px;">📋 Original Booking Details</h3>
+                          <table width="100%" cellpadding="10" cellspacing="0" style="border-collapse:collapse; margin-top:15px; background-color:#f8f9fa;">
+                            <tr>
+                              <td style="border:1px solid #dee2e6; width:40%; font-weight:bold; background-color:#e9ecef;">Vehicle</td>
+                              <td style="border:1px solid #dee2e6;">${bookingPayment.vehicle?.name || 'N/A'} (${bookingPayment.vehicle?.brand || 'N/A'})</td>
+                            </tr>
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Origin</td>
+                              <td style="border:1px solid #dee2e6;">📍 ${bookingPayment.origin}</td>
+                            </tr>
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Destination</td>
+                              <td style="border:1px solid #dee2e6;">📍 ${bookingPayment.destination}</td>
+                            </tr>
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Booking Created</td>
+                              <td style="border:1px solid #dee2e6;">${new Date(bookingPayment.createdAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}</td>
+                            </tr>
+                            <tr>
+                              <td style="border:1px solid #dee2e6; font-weight:bold; background-color:#e9ecef;">Total Amount</td>
+                              <td style="border:1px solid #dee2e6; font-weight:bold;">₹${bookingPayment.totalPrice}</td>
+                            </tr>
+                          </table>
+
+                          <!-- Action Required -->
+                          <div style="background-color:#fff3cd; border-left:4px solid #ffc107; padding:15px; margin-top:25px; border-radius:4px;">
+                            <p style="margin:0; color:#856404; font-weight:bold;">📌 Required Actions:</p>
+                            <ul style="margin:10px 0 0 20px; color:#856404;">
+                              <li>Update vehicle availability in the system</li>
+                              <li>Cancel any driver assignments for this booking</li>
+                              <li>${refundInfo ? 'Monitor refund processing' : 'Note: No refund applicable for this cancellation'}</li>
+                              <li>Update booking records and analytics</li>
+                            </ul>
+                          </div>
+
+                        </td>
+                      </tr>
+
+                      <!-- Footer -->
+                      <tr>
+                        <td style="background-color:#e74c3c; color:#ffffff; text-align:center; padding:20px; font-size:12px;">
+                          <p style="margin:0;">This is an automated notification from RideInBalasore Booking System</p>
+                          <p style="margin:8px 0 0 0; opacity:0.8;">&copy; ${new Date().getFullYear()} RideInBalasore. All rights reserved.</p>
+                        </td>
+                      </tr>
+
+                    </table>
+                  </td>
+                </tr>
+              </table>
+            </body>
+          </html>
+        `,
+      };
+
+      await transporter.sendMail(adminCancellationEmail);
+      console.log("Admin cancellation notification sent successfully");
+    } catch (adminEmailErr) {
+      console.error("Failed to send admin cancellation notification:", adminEmailErr);
     }
 
     return sendResponse(res, 200, true, "Booking cancelled successfully", {
