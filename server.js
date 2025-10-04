@@ -42,11 +42,14 @@ app.use(
 // CORS - restrict to frontend only
 app.use(
   cors({
-    origin: process.env.CLIENT_URL,
-    "http://localhost:5173",
+    origin: [
+      process.env.CLIENT_URL, // production
+      "http://localhost:5173" // local dev
+    ],
     credentials: true,
   })
 );
+
 
 // Rate limiting
 const apiLimiter = rateLimit({
