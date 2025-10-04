@@ -42,7 +42,7 @@ app.use(
 // CORS - restrict to frontend only
 app.use(
   cors({
-    origin: process.env.CLIENT_URL||"*", // production frontend
+    origin: process.env.CLIENT_URL, // production frontend
     credentials: true,
   })
 );
