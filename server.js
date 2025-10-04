@@ -42,7 +42,8 @@ app.use(
 // CORS - restrict to frontend only
 app.use(
   cors({
-    origin: process.env.CLIENT_URL, // production frontend
+    origin: process.env.CLIENT_URL,
+    "http://localhost:5173"// production frontend
     credentials: true,
   })
 );
