@@ -43,8 +43,7 @@ app.use(
 app.use(
   cors({
     origin: [
-      process.env.CLIENT_URL, // production
-      "http://localhost:5173" // local dev
+      process.env.CLIENT_URL,
     ],
     credentials: true,
   })
