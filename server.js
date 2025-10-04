@@ -42,9 +42,8 @@ app.use(
 // CORS - restrict to frontend only
 app.use(
   cors({
-    origin: "https://frontend-rideinbls.onrender.com", // ✅ your production frontend
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    origin: "https://frontend-rideinbls.onrender.com", 
+  
   })
 );
 
