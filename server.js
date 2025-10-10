@@ -40,9 +40,16 @@ app.use(
 );
 
 // CORS - restrict to frontend only
+const allowedOrigin = "http://localhost:5173"; // your React dev server OR production URL
+
 app.use(
   cors({
+<<<<<<< HEAD
     origin: "https://frontend-rideinbls.onrender.com", 
+=======
+    origin: allowedOrigin,  // allow only your frontend
+    credentials: true,      // if you send cookies or Authorization headers
+>>>>>>> e97ef40 (Your message here)
   
   })
 );
