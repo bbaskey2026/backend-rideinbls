@@ -222,16 +222,20 @@ router.post("/register", async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, 12);
 
     // Determine role based on admin email or mobile
-    const adminEmails = process.env.ADMIN_EMAILS 
-      ? process.env.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase()) 
-      : [];
-    const adminMobiles = process.env.ADMIN_MOBILES 
-      ? process.env.ADMIN_MOBILES.split(',').map(m => m.trim()) 
-      : [];
-    
-    const isAdminByEmail = adminEmails.includes(email.toLowerCase());
-    const isAdminByMobile = mobile && adminMobiles.includes(mobile);
-    const role = (isAdminByEmail || isAdminByMobile) ? "admin" : "user";
+   const adminEmails = process.env.ADMIN_EMAILS
+  ? process.env.ADMIN_EMAILS.split(',').map(e => e.trim().toLowerCase())
+  : [];
+
+// Normalize provided email
+const normalizedEmail = (email || '').trim().toLowerCase();
+
+// Check if admin
+const isAdmin = adminEmails.includes(normalizedEmail);
+
+// Assign role
+const role = isAdmin ? "admin" : "user";
+
+
 
     const otp = generateOTP();
     const userData = {
