@@ -1,54 +1,74 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const JWT_SECRET = process.env.JWT_SECRET || "rideinbls_jwt_fallback_secret_key";
 
 export const authMiddleware = async (req, res, next) => {
   try {
-    const authHeader = req.headers["authorization"];
+    const authHeader = req.headers["authorization"] || req.headers["Authorization"];
     if (!authHeader) {
       return res.status(401).json({
         success: false,
-        error: "No token provided",
+        message: "Access token required. Please login.",
       });
     }
 
-    const token = authHeader.split(" ")[1];
+    const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : authHeader;
     if (!token) {
       return res.status(401).json({
         success: false,
-        error: "Invalid token format. Use: Bearer <token>",
+        message: "Invalid token format. Use Bearer <token>",
       });
     }
 
-    // ✅ Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const userId = decoded._id || decoded.id || decoded.userId;
 
-    // ✅ Find user using decoded._id
-    const user = await User.findById(decoded._id).select("-password");
+    const user = await User.findById(userId).select("-password");
     if (!user) {
       return res.status(401).json({
         success: false,
-        error: "User not found or account has been deleted",
+        message: "User session expired or account not found",
       });
     }
 
-    // ✅ Attach user to req
-    req.user = user;
-
-    next();
-  } catch (err) {
-    console.error("Auth middleware error:", err.message);
-
-    if (err.name === "JsonWebTokenError") {
-      return res.status(401).json({ success: false, error: "Invalid token" });
+    if (user.isActive === false || user.isBlocked === true) {
+      return res.status(403).json({
+        success: false,
+        message: "Account suspended or deactivated. Please contact support.",
+      });
     }
 
+    req.user = user;
+    next();
+  } catch (err) {
     if (err.name === "TokenExpiredError") {
       return res.status(401).json({
         success: false,
-        error: "Token has expired. Please login again.",
+        message: "Token expired. Please sign in again.",
       });
     }
-
-    return res.status(500).json({ success: false, error: "Authentication failed" });
+    return res.status(401).json({
+      success: false,
+      message: "Invalid or malformed authorization token.",
+    });
   }
 };
+
+export const adminOnly = (req, res, next) => {
+  if (!req.user || req.user.role !== "admin") {
+    return res.status(403).json({
+      success: false,
+      message: "Forbidden. Administrator privileges required.",
+    });
+  }
+  next();
+};
+
+export const adminMiddleware = adminOnly;
+
+export default { authMiddleware, adminOnly, adminMiddleware };
+

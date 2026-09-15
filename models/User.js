@@ -6,7 +6,7 @@ const userSchema = new mongoose.Schema(
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
-    mobile: { type: Number }, // ✅ Added phone field (used by frontend)
+    mobile: { type: String }, // ✅ Mobile stored as String to support all formats and prevent CastError
     role: {
       type: String,
       enum: ["user", "admin", "manager", "driver", "moderator"], // ✅ Extended roles to match frontend

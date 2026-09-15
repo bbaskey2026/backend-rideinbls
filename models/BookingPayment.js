@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
 
-// Booking + Payment Schema
 const bookingPaymentSchema = new mongoose.Schema(
   {
     // References
@@ -18,12 +17,12 @@ const bookingPaymentSchema = new mongoose.Schema(
     },
 
     // Trip details
-    origin: { type: String },
-    destination: { type: String },
+    origin: { type: String, required: true },
+    destination: { type: String, required: true },
     isRoundTrip: { type: Boolean, default: false },
 
-    // Time details
-    startDate: { type: Date },
+    // Schedule
+    startDate: { type: Date, default: Date.now },
     endDate: { type: Date },
 
     // Unique booking code
@@ -35,40 +34,55 @@ const bookingPaymentSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // Pricing & Payment
+    // Pricing
     totalPrice: { type: Number, required: true },
 
+    // Payment details
     payment: {
       provider: {
         type: String,
-        required: true,
+        default: "razorpay",
         trim: true,
         lowercase: true,
-        enum: ["razorpay", "stripe", "paypal", "other"],
-        index: true
       },
-      providerPaymentId: { type: String, required: true, trim: true },
-      orderId: { type: String, unique: true, required: true, trim: true, index: true },
-      amount: { type: Number, required: true, min: [1, "Amount must be greater than 0"] },
-      currency: { type: String, required: true, uppercase: true, default: "INR", match: /^[A-Z]{3}$/ },
-      status: { type: String, enum: ["pending", "paid", "cancelled", "failed"], default: "pending", index: true },
-      paymentMethod: { type: String, enum: ["card", "upi", "netbanking", "wallet", "cash"], default: "upi" },
-      failureReason: { type: String, trim: true },
-      refundId: { type: String, trim: true },
-      isRefunded: { type: Boolean, default: false },
-      metadata: { type: mongoose.Schema.Types.Mixed },
-      bookedByName: { type: String, trim: true, maxlength: 100 },
+      providerPaymentId: { type: String, trim: true },
+      orderId: { type: String, trim: true, index: true },
+      signature: { type: String },
+      amount: { type: Number, required: true },
+      currency: { type: String, default: "INR" },
+      status: {
+        type: String,
+        enum: ["pending", "paid", "cancelled", "failed", "refunded"],
+        default: "pending",
+      },
+      paymentMethod: { type: String, default: "upi" },
+      failureReason: { type: String },
     },
 
-    // Payment status (for quick reference)
+    // Detailed Refund Tracking
+    refund: {
+      isRefunded: { type: Boolean, default: false },
+      refundId: { type: String, trim: true },
+      refundAmount: { type: Number, default: 0 },
+      refundStatus: {
+        type: String,
+        enum: ["none", "pending", "processed", "failed"],
+        default: "none",
+      },
+      refundedAt: { type: Date },
+      refundReason: { type: String },
+      deductionAmount: { type: Number, default: 0 },
+    },
+
+    // Payment status summary
     paymentStatus: {
       type: String,
-      enum: ["Pending", "Paid", "Failed", "Refunded", "No Refund"],
+      enum: ["Pending", "Paid", "Failed", "Refunded", "Partially Refunded"],
       default: "Pending",
       index: true,
     },
 
-    // Booking status
+    // Booking workflow status
     bookingStatus: {
       type: String,
       enum: ["Pending", "Confirmed", "Cancelled", "Completed"],
@@ -76,18 +90,24 @@ const bookingPaymentSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Admin tracking
-    createdByAdmin: { type: Boolean, default: false },
+    // Assigned driver info
+    assignedDriver: {
+      name: { type: String },
+      mobile: { type: String },
+      licenseNumber: { type: String },
+    },
+
     notes: { type: String },
   },
   { timestamps: true, versionKey: false }
 );
 
-// Indexes for performance
-bookingPaymentSchema.index({ user: 1, vehicle: 1, "payment.orderId": 1 });
+bookingPaymentSchema.index({ user: 1, createdAt: -1 });
 bookingPaymentSchema.index({ vehicle: 1, startDate: 1 });
-bookingPaymentSchema.index({ bookingCode: 1 });
 
-const BookingPayment = mongoose.model("BookingPayment", bookingPaymentSchema);
+const BookingPayment =
+  mongoose.models.BookingPayment ||
+  mongoose.model("BookingPayment", bookingPaymentSchema);
 
 export default BookingPayment;
+
