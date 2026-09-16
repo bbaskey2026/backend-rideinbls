@@ -1,24 +1,11 @@
-import Driver from "../models/Driver.js";
+import * as driverService from "../services/driverService.js";
 
 /**
  * Register / Onboard a driver
  */
 export const registerDriver = async (req, res, next) => {
   try {
-    const existingDriver = await Driver.findOne({
-      $or: [{ email: req.body.email }, { mobile: req.body.mobile }, { licenseNumber: req.body.licenseNumber }],
-    });
-
-    if (existingDriver) {
-      return res.status(400).json({
-        success: false,
-        message: "Driver with this email, mobile, or license number already exists",
-      });
-    }
-
-    const driver = new Driver(req.body);
-    await driver.save();
-
+    const driver = await driverService.registerDriver(req.body);
     res.status(201).json({
       success: true,
       message: "Driver application submitted successfully",
@@ -35,34 +22,10 @@ export const registerDriver = async (req, res, next) => {
 export const getAllDrivers = async (req, res, next) => {
   try {
     const { status, search, page = 1, limit = 20 } = req.query;
-    const query = {};
-
-    if (status) {
-      query.status = status;
-    }
-
-    if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: "i" } },
-        { email: { $regex: search, $options: "i" } },
-        { mobile: { $regex: search, $options: "i" } },
-        { licenseNumber: { $regex: search, $options: "i" } },
-      ];
-    }
-
-    const total = await Driver.countDocuments(query);
-    const drivers = await Driver.find(query)
-      .populate("assignedVehicle")
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit));
-
+    const result = await driverService.getAllDrivers({ status, search, page, limit });
     res.json({
       success: true,
-      total,
-      page: Number(page),
-      totalPages: Math.ceil(total / limit),
-      drivers,
+      ...result,
     });
   } catch (error) {
     next(error);
@@ -74,10 +37,7 @@ export const getAllDrivers = async (req, res, next) => {
  */
 export const getDriverById = async (req, res, next) => {
   try {
-    const driver = await Driver.findById(req.params.id).populate("assignedVehicle");
-    if (!driver) {
-      return res.status(404).json({ success: false, message: "Driver not found" });
-    }
+    const driver = await driverService.getDriverById(req.params.id);
     res.json({ success: true, driver });
   } catch (error) {
     next(error);
@@ -89,15 +49,7 @@ export const getDriverById = async (req, res, next) => {
  */
 export const updateDriver = async (req, res, next) => {
   try {
-    const driver = await Driver.findByIdAndUpdate(req.params.id, req.body, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!driver) {
-      return res.status(404).json({ success: false, message: "Driver not found" });
-    }
-
+    const driver = await driverService.updateDriver(req.params.id, req.body);
     res.json({
       success: true,
       message: "Driver profile updated successfully",
@@ -113,10 +65,7 @@ export const updateDriver = async (req, res, next) => {
  */
 export const deleteDriver = async (req, res, next) => {
   try {
-    const driver = await Driver.findByIdAndDelete(req.params.id);
-    if (!driver) {
-      return res.status(404).json({ success: false, message: "Driver not found" });
-    }
+    await driverService.deleteDriver(req.params.id);
     res.json({ success: true, message: "Driver removed successfully" });
   } catch (error) {
     next(error);

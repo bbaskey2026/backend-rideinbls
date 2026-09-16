@@ -1,23 +1,16 @@
-import mongoose from "mongoose";
-import Vehicle from "../models/Vehicle.js";
+import * as vehicleService from "../services/vehicleService.js";
 
 // 1. List Available Vehicles
 export const getVehicles = async (req, res, next) => {
   try {
-    const { category, type, isAvailable } = req.query;
-
-    let query = {};
-    if (category && category !== "All") {
-      query.category = { $regex: new RegExp(`^${category}$`, "i") };
-    }
-    if (type && type !== "All") {
-      query.type = { $regex: new RegExp(`^${type}$`, "i") };
-    }
-    if (isAvailable !== undefined) {
-      query.isAvailable = isAvailable === "true";
-    }
-
-    const vehicles = await Vehicle.find(query).sort({ createdAt: -1 });
+    const { category, type, isAvailable, isBooked, all } = req.query;
+    const vehicles = await vehicleService.getVehicles({
+      category,
+      type,
+      isAvailable,
+      isBooked,
+      all,
+    });
 
     return res.status(200).json({
       success: true,
@@ -33,15 +26,7 @@ export const getVehicles = async (req, res, next) => {
 export const getVehicleById = async (req, res, next) => {
   try {
     const { id } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid vehicle ID" });
-    }
-
-    const vehicle = await Vehicle.findById(id);
-    if (!vehicle) {
-      return res.status(404).json({ success: false, message: "Vehicle not found" });
-    }
+    const vehicle = await vehicleService.getVehicleById(id);
 
     return res.status(200).json({
       success: true,
@@ -55,8 +40,7 @@ export const getVehicleById = async (req, res, next) => {
 // 3. Admin Create Vehicle
 export const createVehicle = async (req, res, next) => {
   try {
-    const vehicleData = req.body;
-    const vehicle = await Vehicle.create(vehicleData);
+    const vehicle = await vehicleService.createVehicle(req.body);
 
     return res.status(201).json({
       success: true,
@@ -72,18 +56,7 @@ export const createVehicle = async (req, res, next) => {
 export const updateVehicle = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid vehicle ID" });
-    }
-
-    const updated = await Vehicle.findByIdAndUpdate(id, req.body, {
-      new: true,
-      runValidators: true,
-    });
-
-    if (!updated) {
-      return res.status(404).json({ success: false, message: "Vehicle not found" });
-    }
+    const updated = await vehicleService.updateVehicle(id, req.body);
 
     return res.status(200).json({
       success: true,
@@ -99,14 +72,7 @@ export const updateVehicle = async (req, res, next) => {
 export const deleteVehicle = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid vehicle ID" });
-    }
-
-    const deleted = await Vehicle.findByIdAndDelete(id);
-    if (!deleted) {
-      return res.status(404).json({ success: false, message: "Vehicle not found" });
-    }
+    await vehicleService.deleteVehicle(id);
 
     return res.status(200).json({
       success: true,
@@ -121,17 +87,7 @@ export const deleteVehicle = async (req, res, next) => {
 export const toggleAvailability = async (req, res, next) => {
   try {
     const { id } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid vehicle ID" });
-    }
-
-    const vehicle = await Vehicle.findById(id);
-    if (!vehicle) {
-      return res.status(404).json({ success: false, message: "Vehicle not found" });
-    }
-
-    vehicle.isAvailable = !vehicle.isAvailable;
-    await vehicle.save();
+    const vehicle = await vehicleService.toggleAvailability(id);
 
     return res.status(200).json({
       success: true,
@@ -146,4 +102,3 @@ export const toggleAvailability = async (req, res, next) => {
 // Aliases for route flexibility
 export const getAllVehicles = getVehicles;
 export const getAvailableVehicles = getVehicles;
-

@@ -28,8 +28,11 @@ const vehicleSchema = new mongoose.Schema(
     },
     seats: { type: Number, default: 4 },
     capacity: { type: Number, default: 4 },
-    pricePerKM: { type: Number, default: null },
-    pricePerHour: { type: Number },
+    pricePerKM: { type: Number, default: 13 },
+    pricePerKm: { type: Number, default: 13 },
+    pricePerHour: { type: Number, default: 170 },
+    baseFare: { type: Number, default: 0 },
+    driverAllowancePerDay: { type: Number, default: 0 },
 
     // Availability
     isAvailable: { type: Boolean, default: true },
