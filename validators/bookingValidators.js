@@ -55,5 +55,22 @@ export const processRefundSchema = z.object({
     .default({}),
 });
 
+export const calculateFareSchema = z.object({
+  body: z
+    .object({
+      vehicleId: z.string().optional(),
+      distanceKm: z.union([z.number(), z.string()]).optional(),
+      distance: z.union([z.number(), z.string()]).optional(),
+      durationHours: z.union([z.number(), z.string()]).optional(),
+      hours: z.union([z.number(), z.string()]).optional(),
+      isRoundTrip: z.boolean().optional().default(false),
+      startDate: z.string().optional(),
+      endDate: z.string().optional(),
+      gstPercent: z.number().optional().default(5),
+    })
+    .optional()
+    .default({}),
+});
+
 export const refundBookingSchema = processRefundSchema;
 

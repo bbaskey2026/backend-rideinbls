@@ -55,13 +55,13 @@ const seedDatabase = async () => {
 
     // 1. Seed Admin & Demo Users
     console.log("Seeding Users...");
-    await User.deleteMany({ email: { $in: ["admin@rideinbls.com", "demo@rideinbls.com"] } });
+    await User.deleteMany({ email: { $in: ["baskeyadmin69@gmail.com", "admin@rideinbls.com", "demo@rideinbls.com", "bhima.dev26@gmail.com"] } });
 
     await User.create({
       name: "Administrator",
-      email: "admin@rideinbls.com",
-      password: "Admin@123456",
-      mobile: 9876500001,
+      email: "baskeyadmin69@gmail.com",
+      password: "Baskey@2026",
+      mobile: 9876500000,
       role: "admin",
       isActive: true,
     });
@@ -74,7 +74,7 @@ const seedDatabase = async () => {
       role: "user",
       isActive: true,
     });
-    console.log(` ✅ Created Admin user: admin@rideinbls.com`);
+    console.log(` ✅ Created Admin user: baskeyadmin69@gmail.com`);
     console.log(` ✅ Created Demo user: demo@rideinbls.com`);
 
     // 2. Seed 20 Fleet Vehicles
@@ -96,8 +96,8 @@ const seedDatabase = async () => {
     console.log("🎉 DATABASE SEEDING COMPLETED SUCCESSFULLY!");
     console.log("=======================================================");
     console.log("🔑 Default Login Credentials:");
-    console.log("   Admin Email: admin@rideinbls.com");
-    console.log("   Admin Pass:  Admin@123456");
+    console.log("   Admin Email: baskeyadmin69@gmail.com");
+    console.log("   Admin Pass:  Baskey@2026");
     console.log("   User Email:  demo@rideinbls.com");
     console.log("   User Pass:   User@123456");
     console.log("=======================================================\n");

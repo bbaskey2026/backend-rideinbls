@@ -1,5 +1,6 @@
 import express from "express";
 import {
+  calculateFare,
   createRazorpayOrder,
   verifyPaymentAndBook,
   getMyBookings,
@@ -16,9 +17,14 @@ import {
   verifyPaymentSchema,
   cancelBookingSchema,
   refundBookingSchema,
+  calculateFareSchema,
 } from "../validators/bookingValidators.js";
 
 const router = express.Router();
+
+// Fare Calculation & Pricing Engine
+router.get("/calculate-fare", calculateFare);
+router.post("/calculate-fare", validate(calculateFareSchema), calculateFare);
 
 // Public / Authenticated Razorpay Order creation
 router.post("/create-order", validate(createOrderSchema), createRazorpayOrder);
